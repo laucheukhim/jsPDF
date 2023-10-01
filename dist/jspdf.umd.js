@@ -1,7 +1,7 @@
 /** @license
  *
  * jsPDF - PDF Document creation from JavaScript
- * Version 2.5.1 Built on 2022-01-28T15:37:57.789Z
+ * Version 2.5.1 Built on 2023-10-01T13:32:00.262Z
  *                      CommitID 00000000
  *
  * Copyright (c) 2010-2021 James Hall <james@parall.ax>, https://github.com/MrRio/jsPDF
@@ -1717,18 +1717,6 @@
 
     var write = API.__private__.write = function (value) {
       return out(arguments.length === 1 ? value.toString() : Array.prototype.join.call(arguments, " "));
-    };
-
-    var getArrayBuffer = API.__private__.getArrayBuffer = function (data) {
-      var len = data.length,
-          ab = new ArrayBuffer(len),
-          u8 = new Uint8Array(ab);
-
-      while (len--) {
-        u8[len] = data.charCodeAt(len);
-      }
-
-      return ab;
     };
 
     var standardFonts = [["Helvetica", "helvetica", "normal", "WinAnsiEncoding"], ["Helvetica-Bold", "helvetica", "bold", "WinAnsiEncoding"], ["Helvetica-Oblique", "helvetica", "italic", "WinAnsiEncoding"], ["Helvetica-BoldOblique", "helvetica", "bolditalic", "WinAnsiEncoding"], ["Courier", "courier", "normal", "WinAnsiEncoding"], ["Courier-Bold", "courier", "bold", "WinAnsiEncoding"], ["Courier-Oblique", "courier", "italic", "WinAnsiEncoding"], ["Courier-BoldOblique", "courier", "bolditalic", "WinAnsiEncoding"], ["Times-Roman", "times", "normal", "WinAnsiEncoding"], ["Times-Bold", "times", "bold", "WinAnsiEncoding"], ["Times-Italic", "times", "italic", "WinAnsiEncoding"], ["Times-BoldItalic", "times", "bolditalic", "WinAnsiEncoding"], ["ZapfDingbats", "zapfdingbats", "normal", null], ["Symbol", "symbol", "normal", null]];
@@ -3810,11 +3798,57 @@
       out("" + offsetOfXRef);
       out("%%EOF");
       setOutputDestination(pages[currentPage]);
+      return content;
+    };
+
+    var getString = API.__private__.getString = function (content) {
       return content.join("\n");
     };
 
-    var getBlob = API.__private__.getBlob = function (data) {
-      return new Blob([getArrayBuffer(data)], {
+    var getArrayBuffer = API.__private__.getArrayBuffer = function (content) {
+      var length = 0;
+
+      for (var i = 0; i < content.length; i++) {
+        var contentLine = content[i];
+        length += contentLine.length + 1; // +1 for newline
+      }
+
+      var arrayBuffer = new ArrayBuffer(length);
+      var uint8Array = new Uint8Array(arrayBuffer);
+      var index = 0;
+
+      for (var _i = 0; _i < content.length; _i++) {
+        var _contentLine = content[_i];
+
+        for (var j = 0; j < _contentLine.length; j++) {
+          uint8Array[index++] = _contentLine.charCodeAt(j);
+        }
+
+        uint8Array[index++] = 0x0a; // newline
+      }
+
+      return arrayBuffer;
+    };
+
+    var getBlob = API.__private__.getBlob = function (content) {
+      var blobs = [];
+
+      for (var i = 0; i < content.length; i++) {
+        var contentLine = content[i];
+        var arrayBuffer = new ArrayBuffer(contentLine.length + 1); // +1 for newline
+
+        var uint8Array = new Uint8Array(arrayBuffer);
+
+        for (var j = 0; j < contentLine.length; j++) {
+          uint8Array[j] = contentLine.charCodeAt(j);
+        }
+
+        uint8Array[contentLine.length] = 0x0a; // newline
+
+        blobs.push(new Blob([arrayBuffer]));
+      }
+
+      return new Blob(blobs, {
         type: "application/pdf"
       });
     };
@@ -3857,7 +3891,7 @@
 
       switch (type) {
         case undefined:
-          return buildDocument();
+          return getString(buildDocument());
 
         case "save":
           API.save(options.filename);
@@ -3883,7 +3917,7 @@
         case "datauristring":
         case "dataurlstring":
           var dataURI = "";
-          var pdfDocument = buildDocument();
+          var pdfDocument = getString(buildDocument());
 
           try {
             dataURI = btoa(pdfDocument);
@@ -4573,19 +4607,21 @@
       }, options.flags);
       var wordSpacingPerLine = [];
 
+      var findWidth = function findWidth(v) {
+        return scope.getStringUnitWidth(v, {
+          font: activeFont,
+          charSpace: charSpace,
+          fontSize: activeFontSize,
+          doKerning: false
+        }) * activeFontSize / scaleFactor;
+      };
+
       if (Object.prototype.toString.call(text) === "[object Array]") {
         da = transformTextToSpecialArray(text);
         var newY;
 
         if (align !== "left") {
-          lineWidths = da.map(function (v) {
-            return scope.getStringUnitWidth(v, {
-              font: activeFont,
-              charSpace: charSpace,
-              fontSize: activeFontSize,
-              doKerning: false
-            }) * activeFontSize / scaleFactor;
-          });
+          lineWidths = da.map(findWidth);
         } //The first line uses the "main" Td setting,
         //and the subsequent lines are offset by the
         //previous line's x coordinate.
@@ -4639,6 +4675,34 @@
           for (var h = 0; h < len; h++) {
             text.push(da[h]);
           }
+        } else if (align === "justify" && activeFont.encoding === "Identity-H") {
+          // when using unicode fonts, wordSpacePerLine does not apply
+          text = [];
+          len = da.length;
+          maxWidth = maxWidth !== 0 ? maxWidth : pageWidth;
+          var backToStartX = 0;
+
+          for (var l = 0; l < len; l++) {
+            newY = l === 0 ? getVerticalCoordinate(y) : -leading;
+            newX = l === 0 ? getHorizontalCoordinate(x) : backToStartX;
+
+            if (l < len - 1) {
+              var spacing = scale((maxWidth - lineWidths[l]) / (da[l].split(" ").length - 1));
+              var words = da[l].split(" ");
+              text.push([words[0] + " ", newX, newY]);
+              backToStartX = 0; // distance to reset back to the left
+
+              for (var _i2 = 1; _i2 < words.length; _i2++) {
+                var shiftAmount = (findWidth(words[_i2 - 1] + " " + words[_i2]) - findWidth(words[_i2])) * scaleFactor + spacing;
+                if (_i2 == words.length - 1) text.push([words[_i2], shiftAmount, 0]);else text.push([words[_i2] + " ", shiftAmount, 0]);
+                backToStartX -= shiftAmount;
+              }
+            } else {
+              text.push([da[l], newX, newY]);
+            }
+          }
+
+          text.push(["", backToStartX, 0]);
         } else if (align === "justify") {
           text = [];
           len = da.length;
