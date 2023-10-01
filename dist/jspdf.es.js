@@ -1,7 +1,7 @@
 /** @license
  *
  * jsPDF - PDF Document creation from JavaScript
- * Version 2.5.1 Built on 2023-10-01T13:32:00.264Z
+ * Version 2.5.1 Built on 2023-10-01T15:56:38.470Z
  *                      CommitID 00000000
  *
  * Copyright (c) 2010-2021 James Hall <james@parall.ax>, https://github.com/MrRio/jsPDF
@@ -3812,7 +3812,7 @@ function jsPDF(options) {
   };
 
   var getBlob = API.__private__.getBlob = function (content) {
-    var blobs = [];
+    var parts = [];
 
     for (var i = 0; i < content.length; i++) {
       var contentLine = content[i];
@@ -3826,10 +3826,10 @@ function jsPDF(options) {
 
       uint8Array[contentLine.length] = 0x0a; // newline
 
-      blobs.push(new Blob([arrayBuffer]));
+      parts.push(arrayBuffer);
     }
 
-    return new Blob(blobs, {
+    return new Blob(parts, {
       type: "application/pdf"
     });
   };
